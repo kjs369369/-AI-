@@ -1,0 +1,5 @@
+{
+  "name": "8개 구도로 생성 NanoBanana Love! AI Image Generator",
+  "description": "An application that generates multiple stylized images from a single user upload using the Gemini AI. Users can select the number of images, and the app automatically applies different camera angles, poses, and expressions.",
+  "requestFramePermissions": []
+}
