@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { CAMERA_ANGLES, MAX_IMAGES, MIN_IMAGES, MAX_FILE_SIZE_MB } from './constants';
 import { generatePrompt, generateImage } from './services/geminiService';
 import type { GeneratedImage, CameraAngle } from './types';
@@ -88,6 +89,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, selectedFile }) =
   return (
     <div className="w-full">
       <label 
+        htmlFor="file_upload"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         className="flex flex-col justify-center items-center w-full h-40 px-4 transition bg-white/50 border-2 border-dashed rounded-xl appearance-none cursor-pointer hover:border-purple-400 focus:outline-none">
@@ -101,7 +103,88 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, selectedFile }) =
         </span>
          <span className="text-sm text-slate-500 mt-1"> (JPG, PNG / 최대 {MAX_FILE_SIZE_MB}MB)</span>
       </label>
-        <input type="file" name="file_upload" className="hidden" accept="image/jpeg, image/png" onChange={handleChange} />
+        <input id="file_upload" type="file" name="file_upload" className="hidden" accept="image/jpeg, image/png" onChange={handleChange} />
+    </div>
+  );
+};
+
+interface CameraViewProps {
+  onCapture: (file: File) => void;
+  onClose: () => void;
+}
+
+const CameraView: React.FC<CameraViewProps> = ({ onCapture, onClose }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    const startCamera = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } catch (err) {
+        console.error("Error accessing camera: ", err);
+        alert("카메라에 접근할 수 없습니다. 권한을 확인해주세요.");
+        onClose();
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [onClose]);
+
+  const handleCaptureClick = () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        const video = videoRef.current;
+        canvasRef.current.width = video.videoWidth;
+        canvasRef.current.height = video.videoHeight;
+        context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+        
+        canvasRef.current.toBlob(blob => {
+          if (blob) {
+            const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            onCapture(file);
+          }
+        }, 'image/jpeg', 0.95);
+      }
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white p-4 rounded-2xl shadow-2xl relative w-full max-w-2xl text-center">
+        <h3 className="text-xl font-bold text-slate-700 mb-2">카메라</h3>
+        <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg aspect-video object-cover bg-slate-200"></video>
+        <canvas ref={canvasRef} className="hidden"></canvas>
+        <div className="flex justify-center items-center gap-6 mt-4">
+          <button 
+            onClick={handleCaptureClick} 
+            aria-label="Take picture"
+            className="w-20 h-20 bg-white rounded-full border-4 border-purple-500 flex items-center justify-center transition hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+          >
+            <div className="w-16 h-16 bg-purple-500 rounded-full"></div>
+          </button>
+        </div>
+        <button 
+          onClick={onClose} 
+          aria-label="Close camera"
+          className="absolute top-3 right-3 text-slate-500 hover:text-slate-800 transition p-2 rounded-full hover:bg-slate-100"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 };
@@ -147,11 +230,12 @@ const ImageGrid: React.FC<ImageGridProps> = ({ images }) => (
 
 export default function App() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [imageCount, setImageCount] = useState<number>(MIN_IMAGES);
+  const [imageCount, setImageCount] = useState<number>(4);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
   
   const handleFileChange = (file: File | null) => {
     setError(null);
@@ -166,6 +250,11 @@ export default function App() {
         }
     }
     setSourceFile(file);
+  };
+
+  const handleCapture = (file: File) => {
+    handleFileChange(file);
+    setIsCameraOpen(false);
   };
 
   const handleGenerate = useCallback(async () => {
@@ -238,10 +327,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-slate-800 flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">
+      {isCameraOpen && <CameraView onCapture={handleCapture} onClose={() => setIsCameraOpen(false)} />}
       <main className="w-full max-w-4xl flex flex-col items-center gap-8">
         <header className="text-center w-full max-w-2xl">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 via-pink-500 to-red-500 bg-clip-text text-transparent">나노바나나🍌 러브!</h1>
-          <p className="text-lg text-slate-600 mt-2">AI 모델로 새로운 샷 만들기</p>
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 via-pink-500 to-red-500 bg-clip-text text-transparent">나노바나나🍌 러브! (NanoBanana Love!)</h1>
+          <p className="text-lg text-slate-600 mt-2">AI 모델로 새로운 샷 만들기 | Create New Shots with AI</p>
            <div className="mt-4 text-slate-700 bg-white/40 backdrop-blur-sm p-4 rounded-xl shadow-md">
             <p className="text-sm sm:text-base">
               안녕하세요! 👋 나노바나나는 여러분의 사진 한 장을 AI로 분석해 다양한 구도와 표정의 새로운 이미지로 만들어 드립니다.
@@ -262,6 +352,17 @@ export default function App() {
                         <div className="w-full">
                             <label className="font-semibold block mb-2 text-left">① 이미지 업로드</label>
                             <FileUpload onFileChange={handleFileChange} selectedFile={sourceFile} />
+                            <div className="text-center my-2 text-slate-500 font-medium">또는</div>
+                            <button
+                                onClick={() => setIsCameraOpen(true)}
+                                className="w-full flex items-center justify-center gap-2 bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                카메라로 찍기
+                            </button>
                         </div>
                         
                         <div className="w-full">
