@@ -1,10 +1,18 @@
-
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { CAMERA_ANGLES, MAX_IMAGES, MIN_IMAGES, MAX_FILE_SIZE_MB } from './constants';
 import { generatePrompt, generateImage } from './services/geminiService';
 import type { GeneratedImage, CameraAngle } from './types';
+import { useTheme } from './hooks/useTheme';
+import Header from './components/Header';
+import Footer from './components/Footer';
+import FileUpload from './components/FileUpload';
+import CameraView from './components/CameraView';
+import ImageCarousel from './components/ImageCarousel';
+import Lightbox from './components/Lightbox';
+import LoadingBar from './components/LoadingBar';
 
-// Helper function to convert file to base64
+const IMAGE_COUNT_OPTIONS = [1, 2, 4, 6, 8, 10];
+
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -14,240 +22,28 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-
-// --- Helper Components (Defined outside App to prevent re-renders) ---
-
-const HowToUse = () => (
-    <div className="w-full max-w-lg text-center p-6 bg-white/50 backdrop-blur-sm rounded-2xl shadow-md">
-      <h2 className="text-2xl font-bold text-slate-700 mb-4">간단 사용방법</h2>
-      <div className="flex flex-col sm:flex-row justify-around items-start sm:items-center gap-4">
-        {/* Step 1 */}
-        <div className="flex sm:flex-col items-center text-left sm:text-center flex-1">
-          <div className="bg-purple-200 p-3 rounded-full mb-0 sm:mb-2 mr-4 sm:mr-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="font-semibold text-slate-800">1. 이미지 업로드</h3>
-            <p className="text-sm text-slate-600">얼굴이 잘 보이는 사진을 올려주세요.</p>
-          </div>
-        </div>
-  
-        {/* Step 2 */}
-        <div className="flex sm:flex-col items-center text-left sm:text-center flex-1">
-          <div className="bg-pink-200 p-3 rounded-full mb-0 sm:mb-2 mr-4 sm:mr-0">
-             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-pink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 16v-2m8-8h2M4 12H2m15.364 6.364l1.414 1.414M4.222 4.222l1.414 1.414m12.728 0l-1.414 1.414M5.636 18.364l-1.414 1.414M12 16a4 4 0 110-8 4 4 0 010 8z" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="font-semibold text-slate-800">2. 생성 매수 선택</h3>
-            <p className="text-sm text-slate-600">원하는 변환 이미지 개수를 선택하세요.</p>
-          </div>
-        </div>
-  
-        {/* Step 3 */}
-        <div className="flex sm:flex-col items-center text-left sm:text-center flex-1">
-          <div className="bg-blue-200 p-3 rounded-full mb-0 sm:mb-2 mr-4 sm:mr-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="font-semibold text-slate-800">3. 만들기 클릭!</h3>
-            <p className="text-sm text-slate-600">AI가 새로운 이미지를 만들어요.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-interface FileUploadProps {
-  onFileChange: (file: File | null) => void;
-  selectedFile: File | null;
-}
-
-const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, selectedFile }) => {
-  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => e.preventDefault();
-  
-  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onFileChange(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onFileChange(e.target.files[0]);
-    } else {
-      onFileChange(null);
-    }
-  };
-
-  return (
-    <div className="w-full">
-      <label 
-        htmlFor="file_upload"
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        className="flex flex-col justify-center items-center w-full h-40 px-4 transition bg-white/50 border-2 border-dashed rounded-xl appearance-none cursor-pointer hover:border-purple-400 focus:outline-none">
-        <span className="flex items-center space-x-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
-           <span className="font-medium text-slate-600">
-             {selectedFile ? selectedFile.name : '이곳에 파일을 드롭하거나 클릭하세요'}
-          </span>
-        </span>
-         <span className="text-sm text-slate-500 mt-1"> (JPG, PNG / 최대 {MAX_FILE_SIZE_MB}MB)</span>
-      </label>
-        <input id="file_upload" type="file" name="file_upload" className="hidden" accept="image/jpeg, image/png" onChange={handleChange} />
-    </div>
-  );
-};
-
-interface CameraViewProps {
-  onCapture: (file: File) => void;
-  onClose: () => void;
-}
-
-const CameraView: React.FC<CameraViewProps> = ({ onCapture, onClose }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    const startCamera = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (err) {
-        console.error("Error accessing camera: ", err);
-        alert("카메라에 접근할 수 없습니다. 권한을 확인해주세요.");
-        onClose();
-      }
-    };
-
-    startCamera();
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [onClose]);
-
-  const handleCaptureClick = () => {
-    if (videoRef.current && canvasRef.current) {
-      const context = canvasRef.current.getContext('2d');
-      if (context) {
-        const video = videoRef.current;
-        canvasRef.current.width = video.videoWidth;
-        canvasRef.current.height = video.videoHeight;
-        context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-        
-        canvasRef.current.toBlob(blob => {
-          if (blob) {
-            const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            onCapture(file);
-          }
-        }, 'image/jpeg', 0.95);
-      }
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-      <div className="bg-white p-4 rounded-2xl shadow-2xl relative w-full max-w-2xl text-center">
-        <h3 className="text-xl font-bold text-slate-700 mb-2">카메라</h3>
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg aspect-video object-cover bg-slate-200"></video>
-        <canvas ref={canvasRef} className="hidden"></canvas>
-        <div className="flex justify-center items-center gap-6 mt-4">
-          <button 
-            onClick={handleCaptureClick} 
-            aria-label="Take picture"
-            className="w-20 h-20 bg-white rounded-full border-4 border-purple-500 flex items-center justify-center transition hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
-          >
-            <div className="w-16 h-16 bg-purple-500 rounded-full"></div>
-          </button>
-        </div>
-        <button 
-          onClick={onClose} 
-          aria-label="Close camera"
-          className="absolute top-3 right-3 text-slate-500 hover:text-slate-800 transition p-2 rounded-full hover:bg-slate-100"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-};
-
-interface LoadingIndicatorProps {
-  progress: number;
-  total: number;
-}
-
-const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({ progress, total }) => {
-    const completed = Math.round((progress / 100) * total);
-    return (
-        <div className="w-full max-w-md text-center p-8">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto"></div>
-            <p className="mt-6 text-xl font-semibold text-slate-700">바나나 파워로 생성 중...🍌</p>
-            <div className="w-full bg-slate-200 rounded-full h-2.5 mt-4">
-                <div className="bg-purple-500 h-2.5 rounded-full transition-all duration-300 ease-in-out" style={{ width: `${progress}%` }}></div>
-            </div>
-            <p className="mt-2 font-medium text-slate-600">{completed} / {total} 완료</p>
-        </div>
-    );
-};
-
-interface ImageGridProps {
-    images: GeneratedImage[];
-}
-
-const ImageGrid: React.FC<ImageGridProps> = ({ images }) => (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
-        {images.map(image => (
-            <div key={image.id} className="relative group overflow-hidden rounded-lg shadow-lg">
-                <img src={image.src} alt={image.angleName} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/70 to-transparent text-white text-center p-2 font-semibold text-sm">
-                    {image.angleName}
-                </div>
-            </div>
-        ))}
-    </div>
-);
-
-
-// --- Main App Component ---
-
 export default function App() {
+  const { theme, toggleTheme } = useTheme();
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [imageCount, setImageCount] = useState<number>(4);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
   const handleFileChange = (file: File | null) => {
     setError(null);
-    if(file){
-        if(!['image/jpeg', 'image/png'].includes(file.type)){
-            setError('JPG 또는 PNG 파일만 업로드할 수 있습니다.');
-            return;
-        }
-        if(file.size > MAX_FILE_SIZE_MB * 1024 * 1024){
-            setError(`파일 크기는 ${MAX_FILE_SIZE_MB}MB를 초과할 수 없습니다.`);
-            return;
-        }
+    if (file) {
+      if (!['image/jpeg', 'image/png'].includes(file.type)) {
+        setError('JPG 또는 PNG 파일만 업로드할 수 있습니다.');
+        return;
+      }
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        setError(`파일 크기는 ${MAX_FILE_SIZE_MB}MB를 초과할 수 없습니다.`);
+        return;
+      }
     }
     setSourceFile(file);
   };
@@ -260,10 +56,6 @@ export default function App() {
   const handleGenerate = useCallback(async () => {
     if (!sourceFile) {
       setError('이미지 파일을 먼저 업로드해주세요.');
-      return;
-    }
-    if (imageCount < MIN_IMAGES || imageCount > MAX_IMAGES) {
-      setError(`생성 매수는 ${MIN_IMAGES}에서 ${MAX_IMAGES} 사이여야 합니다.`);
       return;
     }
 
@@ -283,32 +75,32 @@ export default function App() {
         const shuffled = [...CAMERA_ANGLES].sort(() => 0.5 - Math.random());
         selectedAngles = shuffled.slice(0, imageCount);
       }
-      
+
       const generationPromises = selectedAngles.map(async (angle) => {
-          const prompt = await generatePrompt(angle.value);
-          const generatedImgBase64 = await generateImage(base64Image, mimeType, prompt);
-          return {
-            id: crypto.randomUUID(),
-            src: `data:image/png;base64,${generatedImgBase64}`,
-            angleName: angle.name,
-          };
+        const prompt = await generatePrompt(angle.value);
+        const generatedImgBase64 = await generateImage(base64Image, mimeType, prompt);
+        return {
+          id: crypto.randomUUID(),
+          src: `data:image/png;base64,${generatedImgBase64}`,
+          angleName: angle.name,
+        };
       });
 
       let completedCount = 0;
       const totalCount = generationPromises.length;
-      
-      const wrappedPromises = generationPromises.map(p => p.then(result => {
-        completedCount++;
-        setProgress(Math.round((completedCount / totalCount) * 100));
-        return result;
-      }));
+      const wrappedPromises = generationPromises.map(p =>
+        p.then(result => {
+          completedCount++;
+          setProgress(Math.round((completedCount / totalCount) * 100));
+          return result;
+        })
+      );
 
       const results = await Promise.all(wrappedPromises);
       setGeneratedImages(results);
-
     } catch (err) {
       console.error(err);
-      setError('생성에 실패했습니다. 다시 시도해주세요.');
+      setError('이미지 생성에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setIsLoading(false);
     }
@@ -326,93 +118,100 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen text-slate-800 flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">
+    <div className="min-h-screen flex flex-col items-center">
       {isCameraOpen && <CameraView onCapture={handleCapture} onClose={() => setIsCameraOpen(false)} />}
-      <main className="w-full max-w-4xl flex flex-col items-center gap-8">
-        <header className="text-center w-full max-w-2xl">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 via-pink-500 to-red-500 bg-clip-text text-transparent">나노바나나🍌 러브! (NanoBanana Love!)</h1>
-          <p className="text-lg text-slate-600 mt-2">AI 모델로 새로운 샷 만들기 | Create New Shots with AI</p>
-           <div className="mt-4 text-slate-700 bg-white/40 backdrop-blur-sm p-4 rounded-xl shadow-md">
-            <p className="text-sm sm:text-base">
-              안녕하세요! 👋 나노바나나는 여러분의 사진 한 장을 AI로 분석해 다양한 구도와 표정의 새로운 이미지로 만들어 드립니다.
-              <br />
-              제작문의 : AICLAB 김진수소장
-            </p>
-          </div>
-        </header>
+      {lightboxIndex !== null && (
+        <Lightbox
+          images={generatedImages}
+          currentIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+        />
+      )}
 
+      <Header theme={theme} onToggleTheme={toggleTheme} />
+
+      <main className="w-full max-w-3xl mx-auto flex flex-col items-center gap-10 px-4 pb-8">
         {isLoading ? (
-          <LoadingIndicator progress={progress} total={imageCount}/>
+          <LoadingBar progress={progress} total={imageCount} />
         ) : (
           <>
             {generatedImages.length === 0 && (
-                 <>
-                    <HowToUse />
-                    <div className="w-full max-w-lg flex flex-col items-center gap-6 p-8 bg-white/60 backdrop-blur-md rounded-2xl shadow-xl">
-                        <div className="w-full">
-                            <label className="font-semibold block mb-2 text-left">① 이미지 업로드</label>
-                            <FileUpload onFileChange={handleFileChange} selectedFile={sourceFile} />
-                            <div className="text-center my-2 text-slate-500 font-medium">또는</div>
-                            <button
-                                onClick={() => setIsCameraOpen(true)}
-                                className="w-full flex items-center justify-center gap-2 bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                                카메라로 찍기
-                            </button>
-                        </div>
-                        
-                        <div className="w-full">
-                            <div className="flex justify-between items-center mb-2">
-                               <label htmlFor="image-count" className="font-semibold">② 생성 매수</label>
-                               <span className="font-bold text-lg text-purple-600 px-3 py-1 bg-purple-100 rounded-full">{imageCount}장</span>
-                            </div>
-                            <input
-                            id="image-count"
-                            type="range"
-                            value={imageCount}
-                            onChange={(e) => setImageCount(parseInt(e.target.value, 10))}
-                            min={MIN_IMAGES}
-                            max={MAX_IMAGES}
-                            className="w-full h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                            />
-                        </div>
-                        
-                        {error && <p className="text-red-600 font-semibold text-center py-2">{error}</p>}
+              <div className="w-full max-w-md mx-auto">
+                {/* Upload Card */}
+                <div className="bg-white dark:bg-apple-card-dark rounded-2xl shadow-sm p-6 space-y-6">
+                  <FileUpload
+                    selectedFile={sourceFile}
+                    onFileChange={handleFileChange}
+                    onOpenCamera={() => setIsCameraOpen(true)}
+                  />
 
+                  {/* Image Count Segment Control */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium text-apple-text dark:text-apple-text-dark">생성 매수</span>
+                      <span className="text-sm font-semibold text-apple-blue dark:text-apple-blue-dark">{imageCount}장</span>
+                    </div>
+                    <div className="flex rounded-lg bg-black/5 dark:bg-white/10 p-1">
+                      {IMAGE_COUNT_OPTIONS.map(count => (
                         <button
-                            onClick={handleGenerate}
-                            disabled={!sourceFile}
-                            className="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:transform-none"
+                          key={count}
+                          onClick={() => setImageCount(count)}
+                          className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                            imageCount === count
+                              ? 'bg-white dark:bg-apple-bg-dark shadow-sm text-apple-blue dark:text-apple-blue-dark'
+                              : 'text-apple-gray dark:text-apple-gray-dark'
+                          }`}
                         >
-                            나노바나나로 만들기!🍌
+                          {count}
                         </button>
+                      ))}
                     </div>
-                 </>
-            )}
-           
-            {generatedImages.length > 0 && (
-                <div className="w-full flex flex-col items-center gap-6">
-                    <ImageGrid images={generatedImages} />
-                    <div className="flex flex-col sm:flex-row gap-4 w-full max-w-lg">
-                        <button onClick={handleDownloadAll} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">
-                            일괄 다운로드
-                        </button>
-                         <button onClick={() => { setGeneratedImages([]); setSourceFile(null); }} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">
-                            새로 만들기
-                        </button>
-                    </div>
+                  </div>
+
+                  {error && (
+                    <p className="text-red-500 text-sm text-center">{error}</p>
+                  )}
+
+                  {/* Generate Button */}
+                  <button
+                    onClick={handleGenerate}
+                    disabled={!sourceFile}
+                    className="w-full py-3 rounded-xl font-semibold text-white bg-apple-blue dark:bg-apple-blue-dark transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                  >
+                    이미지 생성하기
+                  </button>
                 </div>
+              </div>
+            )}
+
+            {generatedImages.length > 0 && (
+              <div className="w-full flex flex-col items-center gap-8">
+                <ImageCarousel
+                  images={generatedImages}
+                  onImageClick={setLightboxIndex}
+                />
+                <div className="flex gap-3 w-full max-w-sm">
+                  <button
+                    onClick={handleDownloadAll}
+                    className="flex-1 py-3 rounded-xl font-semibold text-white bg-emerald-500 transition hover:opacity-90 active:scale-[0.98]"
+                  >
+                    전체 다운로드
+                  </button>
+                  <button
+                    onClick={() => { setGeneratedImages([]); setSourceFile(null); }}
+                    className="flex-1 py-3 rounded-xl font-semibold text-apple-blue dark:text-apple-blue-dark border border-apple-blue dark:border-apple-blue-dark transition hover:bg-apple-blue/5 active:scale-[0.98]"
+                  >
+                    새로 만들기
+                  </button>
+                </div>
+              </div>
             )}
           </>
         )}
       </main>
-      <footer className="w-full text-center text-slate-600 text-sm mt-12 pb-4">
-        <p>Powered by AICLAB &amp; Google Gemini</p>
-      </footer>
+
+      <Footer />
     </div>
   );
 }
